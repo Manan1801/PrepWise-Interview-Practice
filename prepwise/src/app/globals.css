@@ -1,0 +1,84 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #f7f7f4;
+  --card: #ffffff;
+  --ink: #1b1d22;
+  --muted: #5d6270;
+  --line: #e4e4de;
+  --brand: #0f766e;
+  --brand-soft: #e3f3f1;
+  --warn: #b45309;
+  --warn-soft: #fdf3e5;
+  --bad: #b42318;
+  --good: #15803d;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111316;
+    --card: #1a1d22;
+    --ink: #eceef2;
+    --muted: #9aa1ad;
+    --line: #2b3038;
+    --brand: #2dd4bf;
+    --brand-soft: #123b37;
+    --warn: #f59e0b;
+    --warn-soft: #3a2a10;
+    --bad: #f87171;
+    --good: #4ade80;
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-card: var(--card);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-brand: var(--brand);
+  --color-brand-soft: var(--brand-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-bad: var(--bad);
+  --color-good: var(--good);
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+}
+
+@utility card {
+  @apply rounded-2xl border border-line bg-card;
+}
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50;
+}
+@utility btn-primary {
+  @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 bg-brand text-white hover:opacity-90;
+}
+@utility btn-ghost {
+  @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 border border-line bg-card hover:bg-brand-soft;
+}
+@utility chip {
+  @apply rounded-full border border-line px-3 py-1.5 text-sm transition;
+}
+@utility input {
+  @apply w-full rounded-xl border border-line bg-card px-3 py-2.5 text-sm outline-none focus:border-brand;
+}
+@utility label {
+  @apply mb-1.5 block text-sm font-medium;
+}
+.chip[data-on="true"] {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+}
+@media (prefers-color-scheme: dark) {
+  .btn-primary { color: #000; }
+}
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
