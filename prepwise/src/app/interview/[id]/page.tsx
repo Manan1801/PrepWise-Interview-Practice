@@ -36,7 +36,7 @@ export default function InterviewPage({ params }: { params: Promise<{ id: string
   const [now, setNow] = useState(Date.now());
   const sessionRef = useRef<InterviewSession | null>(null);
   const inflight = useRef(false);
-  const endRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const speech = useSpeechInput((txt) => setDraft((d) => (d ? d + " " : "") + txt));
 
@@ -65,7 +65,8 @@ export default function InterviewPage({ params }: { params: Promise<{ id: string
   }, []);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    const el = scrollRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [session?.turns.length, busy]);
 
   const finish = useCallback(
@@ -182,19 +183,19 @@ export default function InterviewPage({ params }: { params: Promise<{ id: string
 
   if (missing)
     return (
-      <div className="card mx-auto max-w-md p-6 text-center">
-        <p>This session was not found in this browser.</p>
-        <Link href="/setup" className="btn-primary mt-4">Start a new one</Link>
+      <div className="card mx-auto max-w-md p-8 text-center">
+        <p className="font-medium">This session was not found in this browser.</p>
+        <Link href="/setup" className="btn-primary mt-5">Start a new one</Link>
       </div>
     );
   if (!session) return <p className="text-muted">Loading…</p>;
 
   if (busy === "report")
     return (
-      <div className="card mx-auto max-w-md p-8 text-center" role="status">
-        <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-brand-soft border-t-brand" />
-        <p className="font-medium">The coach is writing your feedback…</p>
-        <p className="mt-1 text-sm text-muted">Reviewing each answer against the interview plan. This usually takes a few seconds.</p>
+      <div className="card mx-auto mt-10 max-w-md p-10 text-center" role="status">
+        <div className="mx-auto mb-5 h-12 w-12 animate-spin rounded-full border-4 border-brand-soft border-t-brand" />
+        <p className="text-lg font-semibold">The coach is writing your feedback…</p>
+        <p className="mt-1.5 text-sm text-muted">Reviewing each answer against the interview plan. This usually takes a few seconds.</p>
       </div>
     );
 
@@ -206,91 +207,109 @@ export default function InterviewPage({ params }: { params: Promise<{ id: string
   const live = computeMetrics(draft + " " + speech.interim, answerStart ? (now - answerStart) / 1000 : 0, usedVoice);
   const elapsed = answerStart ? Math.floor((now - answerStart) / 1000) : 0;
   const canAct = !busy && !stuck && !!lastInterviewer;
+  const answered = session.turns.some((t) => t.role === "candidate" && t.kind === "answer");
 
   return (
-    <div className="mx-auto grid max-w-5xl gap-4 lg:grid-cols-[1fr_auto]">
-      <div className="min-w-0">
-        {/* Header / plan progress */}
-        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="truncate text-sm text-muted">{config.role}{config.company && ` · ${config.company}`}</div>
-            <div className="mt-2 flex items-center gap-1.5" aria-label={`Question ${session.currentQ + 1} of ${total}`}>
-              {Array.from({ length: total }).map((_, i) => (
-                <span key={i} title={plan?.items[i]?.competency} className={`h-2 w-8 rounded-full ${i < session.currentQ ? "bg-brand" : i === session.currentQ ? "bg-brand/60" : "bg-line"}`} />
-              ))}
-              <span className="ml-2 text-sm font-medium">Q{Math.min(session.currentQ + 1, total)}/{total}</span>
+    <div className={`mx-auto grid gap-5 ${showAgent ? "max-w-6xl lg:grid-cols-[1fr_320px]" : "max-w-4xl"}`}>
+      <div className="min-w-0 space-y-4">
+        {/* Header */}
+        <div className="card p-4 sm:p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="truncate text-lg font-semibold">{config.role}</h1>
+                {config.company && <span className="text-muted">· {config.company}</span>}
+                <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${session.mode === "ai" ? "bg-brand-soft text-brand" : "bg-warn-soft text-warn"}`}>
+                  {session.mode === "ai" ? "● AI interviewer" : "● Offline mode"}
+                </span>
+              </div>
+              {item && (
+                <div className="mt-1 text-sm text-muted">
+                  Question {Math.min(session.currentQ + 1, total)} of {total} · <span className="text-ink">{item.competency}</span>
+                </div>
+              )}
             </div>
-            {item && <div className="mt-1 text-xs text-muted">Now testing: <span className="text-ink">{item.competency}</span></div>}
+            <div className="flex items-center gap-2">
+              <button className="btn-ghost px-3 py-2" onClick={toggleAgent} aria-pressed={showAgent}>{showAgent ? "Hide" : "Show"} reasoning</button>
+              <button className="btn-ghost px-3 py-2" onClick={() => finish(session)} disabled={!!busy || !answered}>End & get feedback</button>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <span className={`rounded-full px-2.5 py-1 text-xs ${session.mode === "ai" ? "bg-brand-soft" : "bg-warn-soft"}`}>{session.mode === "ai" ? "AI interviewer" : "Offline mode"}</span>
-            <button className="btn-ghost py-2" onClick={toggleAgent} aria-pressed={showAgent}>{showAgent ? "Hide" : "Show"} reasoning</button>
-            <button className="btn-ghost py-2" onClick={() => finish(session)} disabled={!!busy || !session.turns.some((t) => t.role === "candidate" && t.kind === "answer")}>
-              End & get feedback
-            </button>
+          <div className="mt-4 flex gap-1.5" aria-label={`Question ${session.currentQ + 1} of ${total}`}>
+            {Array.from({ length: total }).map((_, i) => (
+              <div key={i} title={plan?.items[i]?.competency} className={`h-1.5 flex-1 rounded-full transition-colors ${i < session.currentQ ? "bg-brand" : i === session.currentQ ? "bg-brand/50" : "bg-line"}`} />
+            ))}
           </div>
         </div>
 
         {/* Transcript */}
-        <div className="card max-h-[52vh] space-y-4 overflow-y-auto p-4" aria-live="polite">
-          {session.turns.length === 0 && busy && <div className="text-sm text-muted">The interviewer is planning your interview…</div>}
+        <div ref={scrollRef} className="card max-h-[50vh] min-h-[220px] space-y-5 overflow-y-auto p-4 sm:p-6" aria-live="polite">
+          {session.turns.length === 0 && busy && <Thinking text="The interviewer is planning your interview" />}
           {session.turns.map((t) => (
             <TurnView key={t.id} t={t} onReplay={() => speak(t.text)} />
           ))}
-          {busy === "thinking" && session.turns.length > 0 && (
-            <div className="text-sm text-muted">{retrying ? `Connection hiccup — retrying (${retrying}/2)…` : "Interviewer is thinking…"}</div>
-          )}
-          <div ref={endRef} />
+          {busy === "thinking" && session.turns.length > 0 && <Thinking text={retrying ? `Connection hiccup — retrying (${retrying}/2)` : "Interviewer is thinking"} />}
         </div>
 
         {(error || stuck) && !busy && (
-          <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl bg-warn-soft p-3 text-sm" role="alert">
-            <span className="flex-1">{error || "The interviewer hasn't replied yet."} Your answer is saved.</span>
+          <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-warn/30 bg-warn-soft p-4 text-sm" role="alert">
+            <span className="flex-1">{error || "The interviewer hasn't replied yet."} <b>Your answer is saved.</b></span>
             <button className="btn-primary py-2" onClick={() => { const p = pendingInput(session); if (p) run(p); }}>Retry</button>
           </div>
         )}
 
         {/* Composer */}
-        <div className="card mt-4 p-4">
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
-            <span>Your answer {speech.supported ? "— speak or type (you can edit the transcript before submitting)" : "— type (voice needs Chrome/Edge)"}</span>
-            <button className="underline" onClick={() => setShowStats((v) => !v)}>{showStats ? "Hide" : "Show"} live stats</button>
-          </div>
-          <textarea
-            className="input min-h-32 text-base"
-            placeholder={speech.listening ? "Listening… speak naturally" : "Think out loud — explain your reasoning, not just the answer."}
-            value={draft + (speech.interim ? (draft ? " " : "") + speech.interim : "")}
-            onChange={(e) => {
-              setDraft(e.target.value);
-              if (!answerStart) setAnswerStart(Date.now());
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit();
-            }}
-            disabled={!!busy}
-            aria-label="Your answer"
-          />
-          {showStats && (
-            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
-              <span>⏱ {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}</span>
-              <span>{live.words} words</span>
-              {usedVoice && live.words > 5 && <span>pace: {live.wpm} wpm ({paceLabel(live.wpm, true)})</span>}
-              <span className={live.fillers > 3 ? "text-warn" : ""}>fillers: {live.fillers}</span>
-              {live.hedges > 0 && <span>hedges: {live.hedges}</span>}
-            </div>
-          )}
-          <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className="card p-4 sm:p-5">
+          <div className="flex gap-4">
             {speech.supported && (
-              <button onClick={toggleMic} disabled={!!busy} className={`btn ${speech.listening ? "bg-bad text-white" : "btn-ghost"}`} aria-pressed={speech.listening}>
-                {speech.listening ? "■ Stop mic" : "🎙 Speak"}
+              <button
+                onClick={toggleMic}
+                disabled={!!busy}
+                className={`grid h-14 w-14 shrink-0 place-items-center rounded-full text-white transition disabled:opacity-40 ${speech.listening ? "pw-pulse bg-red-600" : "bg-brand hover:bg-brand-2 dark:text-black"}`}
+                aria-pressed={speech.listening}
+                aria-label={speech.listening ? "Stop recording" : "Answer by voice"}
+                title={speech.listening ? "Stop recording" : "Answer by voice"}
+              >
+                {speech.listening ? <StopIcon /> : <MicIcon />}
               </button>
             )}
-            <button className="btn-ghost" onClick={() => request("hint")} disabled={!canAct}>Hint</button>
-            <button className="btn-ghost" onClick={() => request("clarify")} disabled={!canAct}>Clarify</button>
-            {lastInterviewer && <button className="btn-ghost" onClick={() => speak(lastInterviewer.text)} disabled={!!busy}>Repeat</button>}
-            <button className="btn-ghost" onClick={() => request("skip")} disabled={!canAct}>Skip</button>
-            <button className="btn-primary ml-auto" onClick={submit} disabled={!canAct || !draft.trim()}>
-              Submit answer <span className="hidden text-xs opacity-70 sm:inline">⌘↵</span>
+            <div className="min-w-0 flex-1">
+              <textarea
+                className="input min-h-28 resize-y text-[15px] leading-relaxed"
+                placeholder={speech.listening ? "Listening… speak naturally. You can edit the text before submitting." : speech.supported ? "Tap the mic and speak, or type here. Think out loud — explain your reasoning." : "Type your answer. Think out loud — explain your reasoning."}
+                value={draft + (speech.interim ? (draft ? " " : "") + speech.interim : "")}
+                onChange={(e) => {
+                  setDraft(e.target.value);
+                  if (!answerStart) setAnswerStart(Date.now());
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit();
+                }}
+                disabled={!!busy}
+                aria-label="Your answer"
+              />
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
+                {showStats ? (
+                  <div className="flex flex-wrap gap-x-4 gap-y-1">
+                    <span>⏱ {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}</span>
+                    <span>{live.words} words</span>
+                    {usedVoice && live.words > 5 && <span>{live.wpm} wpm · {paceLabel(live.wpm, true)}</span>}
+                    <span className={live.fillers > 3 ? "font-medium text-warn" : ""}>fillers: {live.fillers}</span>
+                    {live.hedges > 0 && <span>hedges: {live.hedges}</span>}
+                  </div>
+                ) : (
+                  <span>Live stats hidden</span>
+                )}
+                <button className="underline-offset-2 hover:underline" onClick={() => setShowStats((v) => !v)}>{showStats ? "Hide" : "Show"} live stats</button>
+              </div>
+            </div>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-4">
+            <button className="btn-ghost px-3 py-2" onClick={() => request("hint")} disabled={!canAct}>💡 Hint</button>
+            <button className="btn-ghost px-3 py-2" onClick={() => request("clarify")} disabled={!canAct}>❓ Clarify</button>
+            {lastInterviewer && <button className="btn-ghost px-3 py-2" onClick={() => speak(lastInterviewer.text)} disabled={!!busy}>🔁 Repeat</button>}
+            <button className="btn-ghost px-3 py-2" onClick={() => request("skip")} disabled={!canAct}>⏭ Skip</button>
+            <button className="btn-primary ml-auto px-5" onClick={submit} disabled={!canAct || !draft.trim()}>
+              Submit answer <kbd className="hidden rounded bg-white/20 px-1.5 text-[10px] sm:inline">⌘↵</kbd>
             </button>
           </div>
         </div>
@@ -298,28 +317,32 @@ export default function InterviewPage({ params }: { params: Promise<{ id: string
 
       {/* Agent reasoning panel (opt-in, for transparency) */}
       {showAgent && (
-        <aside className="card h-fit max-h-[80vh] overflow-y-auto p-4 text-sm lg:w-80" aria-label="How the interviewer decides">
-          <h2 className="font-medium">How the interviewer decides</h2>
-          <p className="mt-1 text-xs text-muted">The agent plans the interview, grades each answer against a rubric, then picks its next move.</p>
+        <aside className="card h-fit max-h-[85vh] overflow-y-auto p-5 text-sm lg:sticky lg:top-24" aria-label="How the interviewer decides">
+          <p className="eyebrow">Agent reasoning</p>
+          <h2 className="mt-1 font-semibold">How the interviewer decides</h2>
+          <p className="mt-1 text-xs text-muted">It plans the interview, grades each answer against a rubric, then picks its next move.</p>
           {plan && (
-            <div className="mt-3">
-              <div className="text-xs font-medium uppercase tracking-wide text-muted">Plan</div>
-              <ol className="mt-1 space-y-1">
+            <div className="mt-4">
+              <div className="text-xs font-semibold uppercase tracking-wide text-muted">Plan</div>
+              <ol className="mt-2 space-y-1.5">
                 {plan.items.map((p, i) => (
-                  <li key={i} className={i === session.currentQ ? "font-medium" : i < session.currentQ ? "text-muted line-through" : "text-muted"}>
-                    {i + 1}. {p.competency} <span className="text-xs">({p.type})</span>
+                  <li key={i} className={`flex gap-2 ${i === session.currentQ ? "font-medium" : "text-muted"}`}>
+                    <span className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full text-[10px] ${i < session.currentQ ? "bg-brand text-white dark:text-black" : i === session.currentQ ? "bg-brand-soft text-brand ring-1 ring-brand" : "bg-line"}`}>
+                      {i < session.currentQ ? "✓" : i + 1}
+                    </span>
+                    <span>{p.competency} <span className="text-xs font-normal text-muted">· {p.type}</span></span>
                   </li>
                 ))}
               </ol>
-              <div className="mt-2 text-xs text-muted">Difficulty now: {["", "easier", "standard", "harder"][session.difficulty]}</div>
+              <div className="mt-3 inline-block rounded-full bg-brand-soft px-2.5 py-1 text-xs">Difficulty: {["", "easier", "standard", "harder"][session.difficulty]}</div>
             </div>
           )}
-          <div className="mt-4 text-xs font-medium uppercase tracking-wide text-muted">Steps</div>
-          <ol className="mt-1 space-y-2">
+          <div className="mt-5 text-xs font-semibold uppercase tracking-wide text-muted">Latest steps</div>
+          <ol className="mt-2 space-y-2">
             {[...session.trace].reverse().slice(0, 20).map((t, i) => (
-              <li key={i} className="rounded-lg border border-line p-2">
-                <span className="mr-1 rounded bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold uppercase">{t.step}</span>
-                <span className="text-xs">{t.text}</span>
+              <li key={i} className="rounded-xl border border-line p-2.5">
+                <span className={`mr-1.5 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${t.step === "fallback" ? "bg-warn-soft text-warn" : "bg-brand-soft text-brand"}`}>{t.step}</span>
+                <span className="text-xs leading-relaxed">{t.text}</span>
               </li>
             ))}
             {session.trace.length === 0 && <li className="text-xs text-muted">Nothing yet.</li>}
@@ -330,22 +353,75 @@ export default function InterviewPage({ params }: { params: Promise<{ id: string
   );
 }
 
+function Thinking({ text }: { text: string }) {
+  return (
+    <div className="flex items-center gap-3">
+      <Avatar ai />
+      <div className="flex items-center gap-2 rounded-2xl rounded-tl-sm border border-line px-4 py-3 text-sm text-muted">
+        {text}
+        <span className="flex gap-1" aria-hidden>
+          <span className="pw-dot h-1.5 w-1.5 rounded-full bg-muted" />
+          <span className="pw-dot h-1.5 w-1.5 rounded-full bg-muted" />
+          <span className="pw-dot h-1.5 w-1.5 rounded-full bg-muted" />
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function Avatar({ ai }: { ai?: boolean }) {
+  return ai ? (
+    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-gradient-to-br from-brand to-brand-2 text-xs font-bold text-white dark:text-black" aria-hidden>AI</span>
+  ) : (
+    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-line text-xs font-bold" aria-hidden>You</span>
+  );
+}
+
 function TurnView({ t, onReplay }: { t: Turn; onReplay: () => void }) {
   const me = t.role === "candidate";
-  const tag: Record<string, string> = { followup: "Follow-up", hint: "Hint", clarification: "Clarification", closing: "Wrap-up" };
+  const tag: Record<string, string> = { followup: "Follow-up", hint: "Hint", clarification: "Clarification", closing: "Wrap-up", question: "Question" };
   return (
-    <div className={me ? "ml-10" : "mr-10"}>
-      <div className="mb-1 flex items-center gap-2 text-xs text-muted">
-        {me ? "You" : "Interviewer"}
-        {!me && tag[t.kind] && <span className="rounded bg-brand-soft px-1.5 py-0.5">{tag[t.kind]}</span>}
-        {!me && <button onClick={onReplay} className="hover:text-ink" aria-label="Read aloud">🔊</button>}
-      </div>
-      <div className={`whitespace-pre-wrap rounded-xl p-3 text-[15px] leading-relaxed ${me ? "bg-brand-soft" : t.kind === "hint" ? "bg-warn-soft" : "border border-line"}`}>{t.text}</div>
-      {t.quickFeedback && (
-        <div className="mt-1.5 rounded-lg border border-dashed border-line p-2 text-xs">
-          <span className="font-medium">Quick feedback {"●".repeat(t.quickFeedback.score)}{"○".repeat(5 - t.quickFeedback.score)}</span> — {t.quickFeedback.tip}
+    <div className={`flex items-start gap-3 ${me ? "flex-row-reverse" : ""}`}>
+      <Avatar ai={!me} />
+      <div className={`min-w-0 max-w-[85%] ${me ? "items-end text-right" : ""}`}>
+        <div className={`mb-1 flex items-center gap-2 text-xs text-muted ${me ? "justify-end" : ""}`}>
+          {me ? "You" : "Interviewer"}
+          {!me && tag[t.kind] && <span className="rounded-full bg-brand-soft px-2 py-0.5 text-[11px] text-brand">{tag[t.kind]}</span>}
+          {!me && (
+            <button onClick={onReplay} className="rounded p-0.5 hover:text-ink" aria-label="Read aloud" title="Read aloud">🔊</button>
+          )}
         </div>
-      )}
+        <div
+          className={`inline-block whitespace-pre-wrap rounded-2xl px-4 py-3 text-left text-[15px] leading-relaxed ${
+            me ? "rounded-tr-sm bg-brand text-white dark:text-black" : t.kind === "hint" ? "rounded-tl-sm border border-warn/30 bg-warn-soft" : "rounded-tl-sm border border-line bg-card"
+          }`}
+        >
+          {t.text}
+        </div>
+        {t.quickFeedback && (
+          <div className="mt-2 rounded-xl border border-dashed border-line bg-bg px-3 py-2 text-left text-xs">
+            <span className="mr-1 font-semibold">Quick feedback</span>
+            <span className="text-brand" aria-label={`${t.quickFeedback.score} out of 5`}>{"●".repeat(t.quickFeedback.score)}<span className="text-line">{"●".repeat(5 - t.quickFeedback.score)}</span></span>
+            <div className="mt-1 text-muted">{t.quickFeedback.tip}</div>
+          </div>
+        )}
+      </div>
     </div>
+  );
+}
+
+function MicIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+    </svg>
+  );
+}
+function StopIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor" aria-hidden>
+      <rect x="6" y="6" width="12" height="12" rx="2" />
+    </svg>
   );
 }
