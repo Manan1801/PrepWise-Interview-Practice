@@ -10,7 +10,7 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 export const metadata: Metadata = {
   title: "PrepWise — AI Interview Practice | IIT Gandhinagar",
   description:
-    "Self-directed, AI-assisted mock interviews for any role, with realistic follow-ups and actionable feedback. A student project at IIT Gandhinagar.",
+    "Self-directed, AI-assisted mock interviews for any role, with realistic follow-ups and actionable feedback. Made for IIT Gandhinagar.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -41,10 +41,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div className="mx-auto grid max-w-6xl gap-6 px-4 py-8 text-sm md:grid-cols-[1.4fr_1fr_1fr]">
             <div className="flex items-start gap-3">
               <IitgnEmblem size={34} />
-              <div>
-                <div className="font-semibold">Made at IIT Gandhinagar</div>
-                <div className="mt-0.5 text-muted">CS 435 · Human-Computer Interaction · Student course project</div>
-              </div>
+              <div className="self-center font-semibold">Made for IIT Gandhinagar</div>
             </div>
             <div>
               <div className="mb-2 font-semibold">PrepWise</div>
@@ -54,7 +51,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </ul>
             </div>
             <p className="text-muted">
-              Free for everyone. Your practice sessions stay in your own browser. Not an official IIT Gandhinagar service.
+              Free for everyone. Your practice sessions stay in your own browser.
             </p>
           </div>
         </footer>

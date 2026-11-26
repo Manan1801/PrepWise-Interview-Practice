@@ -28,6 +28,7 @@ export function planOffline(c: SessionConfig): InterviewPlan {
       seedQuestion: b.q,
       expectedPoints: b.keywords,
       hint: b.hint,
+      coding: !!b.coding,
     };
   });
   return { summary: `${n}-question ${getTrack(c.track).name} interview for ${c.role || "the role"}`, items };
@@ -115,7 +116,8 @@ export function coachOffline(session: InterviewSession): SessionReport {
     const best = as.length ? Math.max(...as.map((a) => a.score)) : 1;
     const covered = [...new Set(as.flatMap((a) => a.covered))];
     const missing = item.expectedPoints.filter((p) => !covered.includes(p));
-    totWords += words(text);
+    // A submitted solution is a substantial answer even with little prose.
+    totWords += words(text) + (ans.some((a) => a.code) ? 60 : 0);
     if (NUM.test(text)) nums++;
     star += Math.min(3, STAR.filter((m) => text.toLowerCase().includes(m)).length);
     for (const a of ans) {
@@ -151,7 +153,9 @@ export function coachOffline(session: InterviewSession): SessionReport {
       note: `${totFill} filler words, ${totHedge} hedging phrases${wpm ? `, ~${Math.round(wpm)} wpm (comfortable is 110–160)` : ""}.`,
     },
   ];
-  const overall = clamp(dims.reduce((s, d) => s + d.score, 0) / dims.length);
+  // Mostly the per-question grades from the interview itself, nudged by the delivery/style dimensions.
+  const qAvg = questions.reduce((s, q) => s + q.score, 0) / n;
+  const overall = clamp(qAvg * 0.7 + (dims.reduce((s, d) => s + d.score, 0) / dims.length) * 0.3);
   const weakest = [...dims].sort((a, b) => a.score - b.score)[0];
   return {
     overall,

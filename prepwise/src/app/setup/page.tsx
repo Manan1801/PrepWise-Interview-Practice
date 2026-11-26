@@ -218,7 +218,7 @@ function Setup() {
               </div>
             </div>
           </div>
-          <p className="mt-3 px-1 text-xs text-muted">Tip: use Chrome or Edge and a quiet room for the best voice recognition.</p>
+          <p className="mt-3 px-1 text-xs text-muted">Tip: voice answers are transcribed by Whisper and work in any modern browser — a quiet room helps. Coding questions open a built-in code editor (C++, Java, Python, JavaScript).</p>
         </aside>
       </div>
     </div>

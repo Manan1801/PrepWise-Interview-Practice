@@ -5,8 +5,27 @@ import Link from "next/link";
 import { agentCall, reportCall } from "@/lib/api";
 import { getSession, saveSession, uid } from "@/lib/storage";
 import { computeMetrics, paceLabel } from "@/lib/metrics";
-import { speak, stopSpeaking, useSpeechInput } from "@/lib/useSpeech";
-import type { AgentInput, InterviewSession, SessionReport, Turn } from "@/lib/types";
+import { speak, stopSpeaking, useVoiceAnswer } from "@/lib/useSpeech";
+import { LANGS, isLang } from "@/lib/code";
+import { CodeEditor } from "@/components/CodeEditor";
+import type { AgentInput, CodeLang, InterviewSession, RunResult, SessionReport, Turn } from "@/lib/types";
+
+type CodeDrafts = Record<number, { lang: CodeLang; sources: Partial<Record<CodeLang, string>>; run?: RunResult }>;
+const codeKey = (id: string) => `prepwise.code.${id}`;
+function loadDrafts(id: string): CodeDrafts {
+  try {
+    return JSON.parse(localStorage.getItem(codeKey(id)) || "{}");
+  } catch {
+    return {};
+  }
+}
+function preferredLang(): CodeLang {
+  try {
+    const l = localStorage.getItem("prepwise.codeLang");
+    if (isLang(l)) return l;
+  } catch {}
+  return "cpp";
+}
 
 // If the last thing in the transcript is from the candidate, the interviewer still owes a reply
 // (e.g. the request was lost). Work out which agent input to (re)send.
@@ -33,12 +52,30 @@ export default function InterviewPage({ params }: { params: Promise<{ id: string
   const [showAgent, setShowAgent] = useState(false);
   const [answerStart, setAnswerStart] = useState<number | null>(null);
   const [usedVoice, setUsedVoice] = useState(false);
+  const spokenSecs = useRef(0); // seconds actually recorded for the current answer
   const [now, setNow] = useState(Date.now());
   const sessionRef = useRef<InterviewSession | null>(null);
   const inflight = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const speech = useSpeechInput((txt) => setDraft((d) => (d ? d + " " : "") + txt));
+  // ---- code editor (per-question drafts, one source per language) ----
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [drafts, setDrafts] = useState<CodeDrafts>({});
+  const [running, setRunning] = useState(false);
+
+  const voice = useVoiceAnswer(
+    (txt) => {
+      setDraft((d) => (d ? d + " " : "") + txt);
+    },
+    () => {
+      const s = sessionRef.current;
+      const last = s ? [...s.turns].reverse().find((t) => t.role === "interviewer") : undefined;
+      return last?.text ?? "";
+    },
+    (secs) => {
+      spokenSecs.current += secs;
+    },
+  );
 
   const persist = (s: InterviewSession) => {
     sessionRef.current = s;
@@ -59,6 +96,19 @@ export default function InterviewPage({ params }: { params: Promise<{ id: string
     }
   }, [id, router]);
 
+  // Load saved code drafts once, then keep them in localStorage so a reload never loses code.
+  useEffect(() => {
+    setDrafts(loadDrafts(id));
+  }, [id]);
+
+  // Open the editor automatically on coding questions (or where the candidate already wrote code).
+  const curQ = session?.currentQ ?? -1;
+  const curCoding = !!session?.plan?.items[curQ]?.coding;
+  useEffect(() => {
+    if (curQ < 0) return;
+    setEditorOpen(curCoding || !!loadDrafts(id)[curQ]);
+  }, [id, curQ, curCoding]);
+
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
@@ -72,7 +122,7 @@ export default function InterviewPage({ params }: { params: Promise<{ id: string
   const finish = useCallback(
     async (s: InterviewSession) => {
       stopSpeaking();
-      speech.stop();
+      voice.stop();
       setBusy("report");
       let report: SessionReport | undefined;
       try {
@@ -122,6 +172,7 @@ export default function InterviewPage({ params }: { params: Promise<{ id: string
         if (next.config.voiceOut) speak(r.message);
         setAnswerStart(null);
         setUsedVoice(false);
+        spokenSecs.current = 0;
         if (r.ended) await finish(next);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Something went wrong.");
@@ -143,12 +194,69 @@ export default function InterviewPage({ params }: { params: Promise<{ id: string
     if (p) run(p);
   }, [session, run]);
 
+  // Current question's code state
+  const qDraft = session ? drafts[session.currentQ] : undefined;
+  const codeLang: CodeLang = qDraft?.lang ?? preferredLang();
+  const codeSrc = qDraft?.sources[codeLang] ?? LANGS[codeLang].starter;
+  const lastSentCode = session
+    ? [...session.turns].reverse().find((t) => t.role === "candidate" && t.qIndex === session.currentQ && t.code)?.code?.source
+    : undefined;
+  const codeReady = editorOpen && codeSrc.trim() !== LANGS[codeLang].starter.trim() && codeSrc !== lastSentCode;
+
+  function updateCode(patch: { lang?: CodeLang; source?: string; run?: RunResult | null }) {
+    const q = sessionRef.current?.currentQ ?? 0;
+    setDrafts((all) => {
+      const cur = all[q] ?? { lang: codeLang, sources: {} };
+      const lang = patch.lang ?? cur.lang;
+      const next: CodeDrafts = {
+        ...all,
+        [q]: {
+          lang,
+          sources: patch.source !== undefined ? { ...cur.sources, [lang]: patch.source } : cur.sources,
+          run: patch.run === null ? undefined : patch.run ?? cur.run,
+        },
+      };
+      try {
+        localStorage.setItem(codeKey(id), JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+    if (patch.lang)
+      try {
+        localStorage.setItem("prepwise.codeLang", patch.lang);
+      } catch {}
+  }
+
+  async function runCode(stdin: string) {
+    setRunning(true);
+    let res: RunResult;
+    try {
+      const r = await fetch("/api/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ lang: codeLang, source: codeSrc, stdin }), signal: AbortSignal.timeout(60_000) });
+      const j = await r.json();
+      res = r.ok ? j : { status: "unavailable", output: j.error ?? "Couldn't run the code.", stdin };
+    } catch {
+      res = { status: "unavailable", output: "Couldn't reach the code runner. Check your connection and try again.", stdin };
+    }
+    updateCode({ run: res });
+    setRunning(false);
+  }
+
   function submit() {
     const s = sessionRef.current;
-    if (!s || !draft.trim() || busy) return;
-    speech.stop();
-    const secs = answerStart ? (Date.now() - answerStart) / 1000 : 30;
-    const turn: Turn = { id: uid(), role: "candidate", kind: "answer", text: draft.trim(), qIndex: s.currentQ, metrics: computeMetrics(draft, secs, usedVoice), at: Date.now() };
+    if (!s || (!draft.trim() && !codeReady) || busy || voice.state !== "idle") return;
+    // Pace uses the time actually spent speaking; typed answers fall back to elapsed time (pace isn't shown for them).
+    const secs = usedVoice && spokenSecs.current >= 2 ? spokenSecs.current : answerStart ? (Date.now() - answerStart) / 1000 : 30;
+    spokenSecs.current = 0;
+    const turn: Turn = {
+      id: uid(),
+      role: "candidate",
+      kind: "answer",
+      text: draft.trim(),
+      code: codeReady ? { lang: codeLang, source: codeSrc, run: qDraft?.run } : undefined,
+      qIndex: s.currentQ,
+      metrics: computeMetrics(draft, secs, usedVoice),
+      at: Date.now(),
+    };
     persist({ ...s, turns: [...s.turns, turn] });
     setDraft("");
     run("answer");
@@ -164,9 +272,9 @@ export default function InterviewPage({ params }: { params: Promise<{ id: string
   }
 
   function toggleMic() {
-    if (speech.listening) speech.stop();
-    else {
-      speech.start();
+    if (voice.state === "recording") voice.stop();
+    else if (voice.state === "idle") {
+      voice.start();
       setUsedVoice(true);
       if (!answerStart) setAnswerStart(Date.now());
     }
@@ -204,13 +312,23 @@ export default function InterviewPage({ params }: { params: Promise<{ id: string
   const item = plan?.items[session.currentQ];
   const lastInterviewer = [...session.turns].reverse().find((t) => t.role === "interviewer");
   const stuck = !busy && pendingInput(session) !== null;
-  const live = computeMetrics(draft + " " + speech.interim, answerStart ? (now - answerStart) / 1000 : 0, usedVoice);
+  const live = computeMetrics(draft + " " + voice.preview, answerStart ? (now - answerStart) / 1000 : 0, usedVoice);
   const elapsed = answerStart ? Math.floor((now - answerStart) / 1000) : 0;
   const canAct = !busy && !stuck && !!lastInterviewer;
   const answered = session.turns.some((t) => t.role === "candidate" && t.kind === "answer");
 
   return (
-    <div className={`mx-auto grid gap-5 ${showAgent ? "max-w-6xl lg:grid-cols-[1fr_320px]" : "max-w-4xl"}`}>
+    <div
+      className={`mx-auto grid gap-5 ${
+        editorOpen && showAgent
+          ? "max-w-[1500px] xl:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)_300px]"
+          : editorOpen
+            ? "max-w-7xl lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]"
+            : showAgent
+              ? "max-w-6xl lg:grid-cols-[1fr_320px]"
+              : "max-w-4xl"
+      }`}
+    >
       <div className="min-w-0 space-y-4">
         {/* Header */}
         <div className="card p-4 sm:p-5">
@@ -242,7 +360,7 @@ export default function InterviewPage({ params }: { params: Promise<{ id: string
         </div>
 
         {/* Transcript */}
-        <div ref={scrollRef} className="card max-h-[50vh] min-h-[220px] space-y-5 overflow-y-auto p-4 sm:p-6" aria-live="polite">
+        <div ref={scrollRef} className={`card ${editorOpen ? "max-h-[42vh]" : "max-h-[50vh]"} min-h-[220px] space-y-5 overflow-y-auto p-4 sm:p-6`} aria-live="polite">
           {session.turns.length === 0 && busy && <Thinking text="The interviewer is planning your interview" />}
           {session.turns.map((t) => (
             <TurnView key={t.id} t={t} onReplay={() => speak(t.text)} />
@@ -260,23 +378,35 @@ export default function InterviewPage({ params }: { params: Promise<{ id: string
         {/* Composer */}
         <div className="card p-4 sm:p-5">
           <div className="flex gap-4">
-            {speech.supported && (
+            {voice.supported && (
               <button
                 onClick={toggleMic}
-                disabled={!!busy}
-                className={`grid h-14 w-14 shrink-0 place-items-center rounded-full text-white transition disabled:opacity-40 ${speech.listening ? "pw-pulse bg-red-600" : "bg-brand hover:bg-brand-2 dark:text-black"}`}
-                aria-pressed={speech.listening}
-                aria-label={speech.listening ? "Stop recording" : "Answer by voice"}
-                title={speech.listening ? "Stop recording" : "Answer by voice"}
+                disabled={!!busy || voice.state === "transcribing"}
+                className={`grid h-14 w-14 shrink-0 place-items-center rounded-full text-white transition disabled:opacity-60 ${voice.state === "recording" ? "pw-pulse bg-red-600" : "bg-brand hover:bg-brand-2 dark:text-black"}`}
+                aria-pressed={voice.state === "recording"}
+                aria-label={voice.state === "recording" ? "Stop recording" : voice.state === "transcribing" ? "Transcribing" : "Answer by voice"}
+                title={voice.state === "recording" ? "Stop recording" : "Answer by voice"}
               >
-                {speech.listening ? <StopIcon /> : <MicIcon />}
+                {voice.state === "recording" ? <StopIcon /> : voice.state === "transcribing" ? <span className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" /> : <MicIcon />}
               </button>
             )}
             <div className="min-w-0 flex-1">
               <textarea
                 className="input min-h-28 resize-y text-[15px] leading-relaxed"
-                placeholder={speech.listening ? "Listening… speak naturally. You can edit the text before submitting." : speech.supported ? "Tap the mic and speak, or type here. Think out loud — explain your reasoning." : "Type your answer. Think out loud — explain your reasoning."}
-                value={draft + (speech.interim ? (draft ? " " : "") + speech.interim : "")}
+                placeholder={
+                  voice.state === "recording"
+                    ? voice.engine === "whisper"
+                      ? "Recording… speak naturally. Tap stop when you're done — Whisper will transcribe it."
+                      : "Listening… speak naturally. You can edit the text before submitting."
+                    : voice.state === "transcribing"
+                      ? "Transcribing your answer with Whisper…"
+                      : editorOpen
+                        ? "Explain your approach and its time/space complexity (speak or type). Your code is sent with this."
+                        : voice.supported
+                          ? "Tap the mic and speak, or type here. Think out loud — explain your reasoning."
+                          : "Type your answer. Think out loud — explain your reasoning."
+                }
+                value={draft + (voice.preview ? (draft ? " " : "") + voice.preview : "")}
                 onChange={(e) => {
                   setDraft(e.target.value);
                   if (!answerStart) setAnswerStart(Date.now());
@@ -284,9 +414,11 @@ export default function InterviewPage({ params }: { params: Promise<{ id: string
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit();
                 }}
-                disabled={!!busy}
+                disabled={!!busy || voice.state !== "idle"}
                 aria-label="Your answer"
               />
+              {voice.state === "transcribing" && <p className="mt-1.5 text-xs text-brand">Transcribing with Whisper…</p>}
+              {voice.error && <p className="mt-1.5 text-xs text-bad" role="alert">{voice.error}</p>}
               <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
                 {showStats ? (
                   <div className="flex flex-wrap gap-x-4 gap-y-1">
@@ -308,12 +440,36 @@ export default function InterviewPage({ params }: { params: Promise<{ id: string
             <button className="btn-ghost px-3 py-2" onClick={() => request("clarify")} disabled={!canAct}>❓ Clarify</button>
             {lastInterviewer && <button className="btn-ghost px-3 py-2" onClick={() => speak(lastInterviewer.text)} disabled={!!busy}>🔁 Repeat</button>}
             <button className="btn-ghost px-3 py-2" onClick={() => request("skip")} disabled={!canAct}>⏭ Skip</button>
-            <button className="btn-primary ml-auto px-5" onClick={submit} disabled={!canAct || !draft.trim()}>
-              Submit answer <kbd className="hidden rounded bg-white/20 px-1.5 text-[10px] sm:inline">⌘↵</kbd>
+            <button className={`btn-ghost px-3 py-2 ${editorOpen ? "border-brand text-brand" : ""}`} onClick={() => setEditorOpen((v) => !v)} aria-pressed={editorOpen}>
+              &lt;/&gt; {editorOpen ? "Hide editor" : "Code editor"}
             </button>
+            <div className="ml-auto flex items-center gap-3">
+              {codeReady && <span className="hidden text-xs text-muted sm:inline">+ {LANGS[codeLang].label} code attached</span>}
+              <button className="btn-primary px-5" onClick={submit} disabled={!canAct || (!draft.trim() && !codeReady) || voice.state !== "idle"}>
+                Submit answer <kbd className="hidden rounded bg-white/20 px-1.5 text-[10px] sm:inline">⌘↵</kbd>
+              </button>
+            </div>
           </div>
         </div>
       </div>
+
+      {editorOpen && (
+        <div className="min-w-0 lg:sticky lg:top-24 lg:h-fit">
+          <CodeEditor
+            lang={codeLang}
+            source={codeSrc}
+            onLang={(l) => updateCode({ lang: l })}
+            onSource={(src) => updateCode({ source: src })}
+            onRun={runCode}
+            run={qDraft?.run}
+            running={running}
+            disabled={!!busy}
+          />
+          <p className="mt-2 px-1 text-xs text-muted">
+            Code runs in a free online sandbox (Wandbox). When you submit, your code and last run result are sent to the interviewer with your explanation.
+          </p>
+        </div>
+      )}
 
       {/* Agent reasoning panel (opt-in, for transparency) */}
       {showAgent && (
@@ -396,8 +552,9 @@ function TurnView({ t, onReplay }: { t: Turn; onReplay: () => void }) {
             me ? "rounded-tr-sm bg-brand text-white dark:text-black" : t.kind === "hint" ? "rounded-tl-sm border border-warn/30 bg-warn-soft" : "rounded-tl-sm border border-line bg-card"
           }`}
         >
-          {t.text}
+          {t.text || (t.code ? "(submitted code)" : "")}
         </div>
+        {t.code && <CodeBlock code={t.code} />}
         {t.quickFeedback && (
           <div className="mt-2 rounded-xl border border-dashed border-line bg-bg px-3 py-2 text-left text-xs">
             <span className="mr-1 font-semibold">Quick feedback</span>
@@ -407,6 +564,18 @@ function TurnView({ t, onReplay }: { t: Turn; onReplay: () => void }) {
         )}
       </div>
     </div>
+  );
+}
+
+function CodeBlock({ code }: { code: NonNullable<Turn["code"]> }) {
+  const lines = code.source.split("\n").length;
+  return (
+    <details className="mt-2 overflow-hidden rounded-xl border border-line text-left">
+      <summary className="cursor-pointer bg-bg px-3 py-2 text-xs font-medium">
+        &lt;/&gt; {LANGS[code.lang]?.label ?? code.lang} code · {lines} lines{code.run ? ` · last run: ${code.run.status.replace("_", " ")}` : ""}
+      </summary>
+      <pre className="max-h-72 overflow-auto bg-[#1e1e1e] p-3 font-mono text-xs leading-relaxed text-[#d4d4d4]">{code.source}</pre>
+    </details>
   );
 }
 

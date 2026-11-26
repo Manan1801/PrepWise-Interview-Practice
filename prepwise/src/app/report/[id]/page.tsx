@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { getSession, newSession, saveSession } from "@/lib/storage";
 import { reportCall } from "@/lib/api";
 import { DIMENSIONS, getTrack } from "@/lib/tracks";
+import { LANGS } from "@/lib/code";
 import { ScoreRing, scoreTone, scoreWord } from "@/components/ScoreRing";
 import type { InterviewSession, SessionReport } from "@/lib/types";
 
@@ -166,7 +167,17 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
                           <summary className="cursor-pointer text-muted hover:text-ink">Show your answer{ans.length > 1 ? `s (${ans.length})` : ""}</summary>
                           <div className="mt-2 space-y-2">
                             {ans.map((a) => (
-                              <p key={a.id} className="whitespace-pre-wrap rounded-xl border border-line p-3">{a.text}</p>
+                              <div key={a.id} className="space-y-2">
+                                {a.text && <p className="whitespace-pre-wrap rounded-xl border border-line p-3">{a.text}</p>}
+                                {a.code && (
+                                  <div className="overflow-hidden rounded-xl border border-line">
+                                    <div className="bg-bg px-3 py-1.5 text-xs font-medium">
+                                      {LANGS[a.code.lang]?.label ?? a.code.lang} code{a.code.run ? ` · last run: ${a.code.run.status.replace("_", " ")}` : ""}
+                                    </div>
+                                    <pre className="max-h-80 overflow-auto bg-[#1e1e1e] p-3 font-mono text-xs leading-relaxed text-[#d4d4d4]">{a.code.source}</pre>
+                                  </div>
+                                )}
+                              </div>
                             ))}
                           </div>
                         </details>

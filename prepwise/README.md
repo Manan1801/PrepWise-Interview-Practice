@@ -8,7 +8,7 @@ PrepWise lets anyone practise a realistic mock interview on their own, for **any
 listens to each answer (by voice or text), asks follow-up questions about what you actually said, adapts its difficulty, and finishes
 with specific, actionable feedback. It is free, needs no login, and keeps all practice data in the student's own browser.
 
-> Student course project. Not an official IIT Gandhinagar service.
+> Made for IIT Gandhinagar.
 
 ---
 
@@ -66,7 +66,17 @@ limited support for structured, self-directed practice across different intervie
 - A live "Your interview" summary card with the Start button.
 
 **Interview**
-- Answer by **voice** (speech-to-text, Indian English) or by typing; the transcript stays editable before submitting.
+- Answer by **voice** or by typing. Voice is recorded and transcribed by **Whisper** (`whisper-large-v3-turbo` on Groq, free) when you
+  stop — far more accurate on Indian accents and technical words than the browser engine, and it works in every modern browser.
+  While you speak, the browser's own recogniser (if available) shows a live preview, and is used as a fallback if Whisper fails.
+  The transcript stays editable before submitting.
+- **Built-in code editor (IDE)** for coding questions: Monaco (the editor from VS Code) with **C++, Java, Python and JavaScript**,
+  syntax highlighting, custom input (stdin) and a **Run** button that compiles and runs the code in a free online sandbox (Wandbox).
+  Compile errors, runtime errors and time-limit kills are shown clearly. The editor opens automatically on questions the planner
+  marks as coding problems and can be opened on any question with the `</> Code editor` button. Code is saved per question and per
+  language, so a reload or a language switch never loses it.
+- When you submit, your **code and its last run result are sent with your explanation**; the assessor judges correctness (incl. edge
+  cases), time/space complexity and readability, and follow-ups can ask you to fix or optimise your code.
 - Interviewer can **read questions aloud** (text-to-speech).
 - Live stats: time, word count, words per minute, filler words, hedging phrases (can be hidden).
 - Controls: **Hint**, **Clarify**, **Repeat**, **Skip**, **End & get feedback**, ⌘/Ctrl + Enter to submit.
@@ -78,7 +88,7 @@ limited support for structured, self-directed practice across different intervie
 - Overall score ring (1–10) with a verdict and a 2–3 sentence summary.
 - Skill breakdown with evidence-based notes.
 - Delivery stats: speaking pace, filler words (which ones), total words.
-- Per question: competency tested, what worked, what to improve, what the interviewer was looking for, and how a strong answer is structured.
+- Per question: your answer and submitted code, competency tested, what worked, what to improve, what the interviewer was looking for, and how a strong answer is structured.
 - A three-step next-practice plan. Save as PDF (print-friendly).
 
 **Progress**
@@ -111,8 +121,8 @@ flowchart LR
 
 | Step | Who | What it produces |
 |---|---|---|
-| **Plan** | LLM (`planLLM`) | N items, each with a competency, question type, the question, 3–5 **expected points** (the rubric), and a hint. Uses the resume and JD. |
-| **Assess** | LLM (`assessLLM`) | `signal` (strong / partial / weak / off_topic / no_answer), score 1–5, rubric points covered and missing, a private note, and a coaching tip. |
+| **Plan** | LLM (`planLLM`) | N items, each with a competency, question type, the question, 3–5 **expected points** (the rubric), a hint, and `needs_code` (opens the editor). For software roles it includes 1–2 hands-on coding problems. Uses the resume and JD. |
+| **Assess** | LLM (`assessLLM`) | `signal` (strong / partial / weak / off_topic / no_answer), score 1–5, rubric points covered and missing, a private note, and a coaching tip. On coding questions it reads the submitted code and run result and checks correctness, edge cases and complexity; code that fails to compile or gives wrong output can't be rated strong. |
 | **Decide** | **Code** (`policy.ts`) | One action: `probe` (target a missing point), `redirect`, `deepen`, `next`, or `close`, plus an adapted difficulty (1–3). |
 | **Act** | LLM (`speakLLM`) | What the interviewer says, in the chosen style, under 70 words (it may be read aloud). |
 | **Coach** | LLM (`coachLLM`) | The final report, grounded in the plan, the assessor's notes, the transcript and the delivery metrics. |
@@ -149,8 +159,9 @@ a `FALLBACK` entry. The interview never gets stuck.
   transcripts are editable; the grader is told to ignore transcription glitches (e.g. "Major Singh" for "majoring in").
 - **Accessibility:** keyboard operable, visible focus rings, ARIA labels on icon buttons, `aria-live` transcript, reduced-motion
   support, light/dark themes, responsive to phone width, voice input and output.
-- **Privacy:** no accounts, no database; sessions and resume stay in the browser's local storage. Only the text needed for each turn
-  is sent to the AI provider.
+- **Privacy:** no accounts, no database; sessions and resume stay in the browser's local storage. Only what each step needs is sent out:
+  answer text to the AI provider, voice recordings to Groq Whisper for transcription (not stored by PrepWise), and code to Wandbox
+  when you press Run.
 
 ## 6. Tech stack
 
@@ -160,7 +171,9 @@ a `FALLBACK` entry. The interview never gets stuck.
 | Styling | **Tailwind CSS v4** with design tokens (CSS variables) for light and dark mode |
 | AI | Free-tier LLMs via REST: **Groq** (`openai/gpt-oss-120b`, `llama-3.3-70b-versatile`, `openai/gpt-oss-20b`, `llama-3.1-8b-instant`) and **Google Gemini** (`gemini-3.5-flash-lite`, `gemini-3.6-flash`) |
 | Structured output | JSON mode + **Zod** schema validation (`z.toJSONSchema` in the prompt, `safeParse` on the result) |
-| Voice | **Web Speech API** — `SpeechRecognition` (en-IN) for answers, `speechSynthesis` for the interviewer |
+| Voice | **Whisper** (`whisper-large-v3-turbo` on Groq, free) via `MediaRecorder` → `/api/transcribe`; Web Speech API as live preview and fallback; `speechSynthesis` for the interviewer |
+| Code editor | **Monaco** (`@monaco-editor/react`, loaded from a CDN) with C++ (GCC 13, C++17), Java 21, Python 3.12, Node.js 20 |
+| Code execution | **Wandbox** public compile API (free, no key) via `/api/run` — nothing runs on our own server |
 | Storage | Browser `localStorage` (no database, no login) |
 | Hosting | **Vercel** (serverless API routes, region bom1) |
 | Quality | ESLint (next config), TypeScript strict type-checking |
@@ -197,9 +210,12 @@ prepwise/
     │   ├── report/[id]/page.tsx     # feedback report
     │   ├── progress/page.tsx        # history, trends
     │   └── api/
-    │       ├── agent/route.ts   # POST: one agent turn; GET: is AI configured?
-    │       └── report/route.ts  # POST: coach report
+    │       ├── agent/route.ts      # POST: one agent turn; GET: is AI configured?
+    │       ├── report/route.ts     # POST: coach report
+    │       ├── run/route.ts        # POST: compile + run code (Wandbox)
+    │       └── transcribe/route.ts # POST: audio → text (Whisper on Groq)
     ├── components/
+    │   ├── CodeEditor.tsx       # Monaco editor, language picker, stdin, Run, output
     │   ├── IitgnMark.tsx        # IITGN emblem + wordmark
     │   ├── NavLinks.tsx
     │   └── ScoreRing.tsx        # circular score gauge + score colours
@@ -214,7 +230,9 @@ prepwise/
         ├── guard.ts             # rate limiting + input sanitising
         ├── tracks.ts            # presets, question bank, rubric dimensions
         ├── metrics.ts           # filler words, hedges, words per minute
-        ├── useSpeech.ts         # speech recognition + text-to-speech
+        ├── useSpeech.ts         # Whisper recording + browser speech preview/fallback + text-to-speech
+        ├── code.ts              # editor languages, starter code, how code is shown to the agent
+        ├── problems.ts          # 12 hand-checked coding problems (examples verified by running reference solutions)
         ├── storage.ts           # localStorage sessions
         └── types.ts             # shared types
 ```
@@ -239,7 +257,8 @@ GEMINI_API_KEY=...   # https://aistudio.google.com/apikey  (free)
 
 Then restart `npm run dev`. Other scripts: `npm run build`, `npm run start`, `npm run lint`.
 
-Voice input works best in **Chrome or Edge**, with a microphone and a quiet room.
+Voice input uses Whisper when `GROQ_API_KEY` is set (any modern browser); without it, it falls back to the browser's speech
+recognition (best in Chrome or Edge). Running code needs internet access to wandbox.org.
 
 ## 10. Deploy on Vercel
 
@@ -258,6 +277,8 @@ Environment variables (Vercel → Project → Settings → Environment Variables
 | `GROQ_MODELS_SMART` | no | Comma-separated override of the smart Groq pool |
 | `GROQ_MODELS_FAST` | no | Comma-separated override of the fast Groq pool |
 | `GEMINI_MODELS` | no | Comma-separated override of the Gemini pool |
+| `GROQ_WHISPER_MODEL` | no | Speech-to-text model (default `whisper-large-v3-turbo`) |
+| `WANDBOX_URL` | no | Code-runner endpoint (default `https://wandbox.org/api/compile.json`) |
 
 Logs: `npx vercel logs --deployment prepwise-red-xi.vercel.app` (lines start with `[llm]` and `[agent]`).
 
@@ -274,6 +295,9 @@ Logs: `npx vercel logs --deployment prepwise-red-xi.vercel.app` (lines start wit
 | Non-tech roles (primary school teacher, mechanical design engineer) | Sensible role-specific plans (e.g. classroom management, lesson planning) |
 | Latency comparison | Gemini free tier > 20 s per turn (often overloaded) vs Groq < 1 s → Groq made primary |
 | Visual checks | Light mode, dark mode, 375 px phone width (no horizontal scroll) |
+| Code runner | C++, Java (incl. `public class Main`), Python, JavaScript: correct output, compile error, runtime error and time-limit cases all reported correctly; 1–10 s per run |
+| Code grading (live AI) | Code solving the wrong problem → `off_topic`, interviewer redirected; correct O(n) two-sum with explanation → `strong` 5/5, tough interviewer asked a harder follow-up |
+| Whisper | Synthesised spoken answer → accurate transcript in ~2 s, fillers ("Um", "Uh") kept |
 | Static checks | `tsc --noEmit` and `eslint` clean |
 
 ## 12. Development log — everything we built and fixed
@@ -293,21 +317,33 @@ Logs: `npx vercel logs --deployment prepwise-red-xi.vercel.app` (lines start wit
    smaller prompts; also fixed the opener occasionally omitting the first question (now appended in code).
 9. **Moved the project to the Desktop** (`~/Desktop/PrepWise-Interview-Practice/prepwise`), reinstalled dependencies, and stopped a
    stale dev server from the old folder.
-10. **Added IIT Gandhinagar branding:** emblem in header, hero, footer and as the favicon, with a "not an official IITGN service" note.
+10. **Added IIT Gandhinagar branding:** emblem in header, hero, footer and as the favicon.
     The emblem was cropped from the IITGN Library logo and the sideways "IITGN" text was replaced with a horizontal wordmark so it no
     longer looks tilted.
 11. **UI redesign:** new design tokens and components; two-column setup with a live summary card; chat-style interview with avatars,
     typing indicator and a pulsing mic button; report with score ring and colour-coded skills; progress with stat tiles and an area chart.
 12. **Wrote this README.**
+13. **Branding text:** footer and hero now say "Made for IIT Gandhinagar".
+14. **Added a built-in code editor (IDE)** for coding rounds: C++, Java, Python and JavaScript with Run, custom input and clear
+    compile/runtime/time-limit results; the planner adds coding problems for software roles, and the assessor grades the submitted
+    code. (The public Piston runner turned out to be whitelist-only, so Wandbox is used; Java's `public class Main` is handled
+    automatically.) Testing showed the AI sometimes wrote coding problems with **wrong example outputs**, so coding questions now
+    always come from a **verified list of 12 standard problems** (`problems.ts`); the interviewer presents them word for word.
+    The planner was also stopped from inventing "your recent project" when no resume is given.
+15. **Switched voice answers to Whisper** (free on Groq) for much better accuracy on accents and technical terms, in every browser,
+    with the browser engine as live preview and fallback; Whisper is primed to keep "um/uh" so filler counts stay meaningful.
 
 ## 13. Known limitations and future work
 
 - **Free-tier capacity:** roughly a few dozen simultaneous students. Beyond that some turns fall back to the rule-based brain; a paid
   key or more providers would remove this.
-- **Voice:** best in Chrome and Edge; Safari support varies; no audio is analysed (tone, pauses) — only the transcript and timing.
+- **Voice:** Whisper transcribes after you stop (no word-by-word text in browsers without built-in recognition); recordings are capped
+  at 5 minutes; no audio is analysed (tone, pauses) — only the transcript and timing.
+- **Code runner:** depends on the free public Wandbox service (no SLA); C++/Java runs take about 3–15 s. There are no hidden test
+  cases yet — correctness is judged by the AI and by the candidate's own runs.
 - **No accounts:** progress is per browser. A future version could add optional sign-in (e.g. IITGN Google login) and sync.
 - **Assessment quality** depends on the free model; the rubric and the explicit policy limit — but don't remove — model mistakes.
-- **Ideas:** video/eye-contact feedback, coding-question editor, peer review mode, placement-cell question sets per company,
+- **Ideas:** video/eye-contact feedback, hidden test cases for coding problems, peer review mode, placement-cell question sets per company,
   multilingual practice (Hindi/Gujarati), "retry this question" drills.
 
 ## 14. Suggested user study

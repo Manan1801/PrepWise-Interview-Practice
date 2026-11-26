@@ -39,7 +39,7 @@ export default function Home() {
           <div>
             <div className="mb-5 inline-flex items-center gap-3 rounded-2xl border border-line bg-card py-1.5 pl-1.5 pr-4 text-sm shadow-sm">
               <IitgnEmblem size={22} />
-              <span className="font-medium">A student project at <span className="text-brand">IIT Gandhinagar</span></span>
+              <span className="font-medium">Made for <span className="text-brand">IIT Gandhinagar</span></span>
             </div>
             <h1 className="text-4xl font-semibold leading-[1.1] tracking-tight md:text-[3.25rem]">
               Practise interviews on your own — with an interviewer that <span className="text-brand">actually listens.</span>

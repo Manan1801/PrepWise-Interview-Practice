@@ -5,7 +5,6 @@ const FILLERS = [
   "uh",
   "umm",
   "uhh",
-  "like",
   "you know",
   "basically",
   "actually",
@@ -32,6 +31,15 @@ function countPhrase(text: string, phrase: string) {
   return (text.match(re) || []).length;
 }
 
+/**
+ * "like" is usually a real word ("a structure like a heap", "I'd like to"), so count it only when it's set off
+ * as a filler: "it was, like, fast", "like, we used…", "like uh".
+ */
+function countFillerLike(text: string) {
+  const re = /\blike\b(?=,?\s+(?:um+|uh+)\b)|(?:^|[,.?!;:]\s*)like\b(?=\s*[,.?!;:])/gi;
+  return (text.match(re) || []).length;
+}
+
 export function computeMetrics(text: string, seconds: number, usedVoice: boolean): DeliveryMetrics {
   const clean = text.toLowerCase();
   const words = clean.split(/\s+/).filter(Boolean).length;
@@ -43,6 +51,11 @@ export function computeMetrics(text: string, seconds: number, usedVoice: boolean
       fillerList[f] = n;
       fillers += n;
     }
+  }
+  const like = countFillerLike(clean);
+  if (like) {
+    fillerList.like = like;
+    fillers += like;
   }
   let hedges = 0;
   for (const h of HEDGES) hedges += countPhrase(clean, h);

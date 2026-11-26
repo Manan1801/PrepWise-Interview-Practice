@@ -8,7 +8,7 @@ export interface TrackDef {
   examples: string;
   focusOptions: string[];
   // Offline question bank — used when no AI key is configured, and as seeds.
-  bank: { c: string; q: string; followups: string[]; hint: string; keywords: string[] }[];
+  bank: { c: string; q: string; followups: string[]; hint: string; keywords: string[]; coding?: boolean }[];
 }
 
 export const DIMENSIONS: Record<DimensionKey, { label: string; desc: string }> = {
@@ -117,6 +117,7 @@ export const TRACKS: TrackDef[] = [
         ],
         hint: "Think about what you need to remember about numbers you've already seen. Is there a data structure with O(1) lookup?",
         keywords: ["hash", "map", "o(n)", "complement", "sorted", "two pointer"],
+        coding: true,
       },
       {
         c: "OS fundamentals",

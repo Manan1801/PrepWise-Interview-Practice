@@ -1,4 +1,5 @@
 import "server-only";
+import { answerText } from "../code";
 // PrepWise interviewer agent.
 //
 //   start  ─► PLAN (build interview plan from role/JD/resume) ─► ACT (opener + Q1)
@@ -70,7 +71,7 @@ export async function runAgent({ input, state }: AgentRequest): Promise<AgentRes
   let tip: string | undefined;
   if (input === "answer") {
     const last = [...s.turns].reverse().find((t) => t.role === "candidate" && t.kind === "answer");
-    const answer = last?.text ?? "";
+    const answer = last ? answerText(last) : "";
     const r = await step(
       trace,
       "assess",

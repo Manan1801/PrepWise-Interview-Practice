@@ -31,6 +31,7 @@ export interface PlanItem {
   seedQuestion: string; // the planned question (the interviewer may adapt wording)
   expectedPoints: string[]; // what a strong answer should cover — the assessment rubric
   hint: string;
+  coding?: boolean; // the candidate is expected to write code — the editor opens automatically
 }
 
 export interface InterviewPlan {
@@ -84,11 +85,27 @@ export interface QuickFeedback {
   tip: string;
 }
 
+export type CodeLang = "cpp" | "java" | "python" | "javascript";
+
+export interface RunResult {
+  status: "ok" | "compile_error" | "runtime_error" | "timeout" | "unavailable";
+  output: string; // stdout, or the compiler/runtime error text
+  stdin?: string;
+  ms?: number;
+}
+
+export interface CodeAttachment {
+  lang: CodeLang;
+  source: string;
+  run?: RunResult; // the last run before submitting, if any
+}
+
 export interface Turn {
   id: string;
   role: "interviewer" | "candidate";
   kind: TurnKind;
   text: string;
+  code?: CodeAttachment; // code written in the built-in editor, sent with the answer
   qIndex: number;
   metrics?: DeliveryMetrics;
   quickFeedback?: QuickFeedback;

@@ -1,19 +1,20 @@
 import "server-only";
 import type { AgentState } from "./types";
+import { isLang, MAX_CODE } from "./code";
 
 // Basic abuse limits so a public deployment can't be used to burn the free API quota.
 const hits = new Map<string, { n: number; reset: number }>();
 const WINDOW_MS = 60_000;
 const MAX_PER_WINDOW = 40;
 
-export function rateLimited(ip: string) {
+export function rateLimited(key: string, max = MAX_PER_WINDOW) {
   const now = Date.now();
-  const h = hits.get(ip);
+  const h = hits.get(key);
   if (!h || h.reset < now) {
-    hits.set(ip, { n: 1, reset: now + WINDOW_MS });
+    hits.set(key, { n: 1, reset: now + WINDOW_MS });
     return false;
   }
-  return ++h.n > MAX_PER_WINDOW;
+  return ++h.n > max;
 }
 
 const str = (v: unknown, max: number) => String(v ?? "").slice(0, max);
@@ -41,10 +42,22 @@ export function sanitizeState(s: AgentState): AgentState {
             seedQuestion: str(i.seedQuestion, 600),
             expectedPoints: (i.expectedPoints ?? []).slice(0, 6).map((p) => str(p, 160)),
             hint: str(i.hint, 400),
+            coding: Boolean(i.coding),
           })),
         }
       : undefined,
-    turns: (s.turns ?? []).slice(-60).map((t) => ({ ...t, text: str(t.text, 4000) })),
+    turns: (s.turns ?? []).slice(-60).map((t) => ({
+      ...t,
+      text: str(t.text, 4000),
+      code:
+        t.code && isLang(t.code.lang)
+          ? {
+              lang: t.code.lang,
+              source: str(t.code.source, MAX_CODE),
+              run: t.code.run ? { status: t.code.run.status, output: str(t.code.run.output, 600), stdin: str(t.code.run.stdin, 300) } : undefined,
+            }
+          : undefined,
+    })),
     assessments: (s.assessments ?? []).slice(-40),
     currentQ: Math.max(0, Number(s.currentQ) || 0),
     difficulty: Math.max(1, Math.min(3, Number(s.difficulty) || 2)),
