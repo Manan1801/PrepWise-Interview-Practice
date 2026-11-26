@@ -85,7 +85,8 @@ limited support for structured, self-directed practice across different intervie
 - **Reliable on bad networks**: automatic retries, a Retry button, and recovery after a page reload — answers are never lost.
 
 **Report**
-- Overall score ring (1–10) with a verdict and a 2–3 sentence summary.
+- Overall score ring (1–10) with a verdict and a 2–3 sentence summary. The score is **anchored to the grades your answers got during the
+  interview** (see [How scoring works](#how-scoring-works)), so the report can't contradict how the interview actually went.
 - Skill breakdown with evidence-based notes.
 - Delivery stats: speaking pace, filler words (which ones), total words.
 - Per question: your answer and submitted code, competency tested, what worked, what to improve, what the interviewer was looking for, and how a strong answer is structured.
@@ -125,7 +126,20 @@ flowchart LR
 | **Assess** | LLM (`assessLLM`) | `signal` (strong / partial / weak / off_topic / no_answer), score 1–5, rubric points covered and missing, a private note, and a coaching tip. On coding questions it reads the submitted code and run result and checks correctness, edge cases and complexity; code that fails to compile or gives wrong output can't be rated strong. |
 | **Decide** | **Code** (`policy.ts`) | One action: `probe` (target a missing point), `redirect`, `deepen`, `next`, or `close`, plus an adapted difficulty (1–3). |
 | **Act** | LLM (`speakLLM`) | What the interviewer says, in the chosen style, under 70 words (it may be read aloud). |
-| **Coach** | LLM (`coachLLM`) | The final report, grounded in the plan, the assessor's notes, the transcript and the delivery metrics. |
+| **Coach** | LLM (`coachLLM`) | The final report, grounded in the plan, the assessor's notes, the transcript and the delivery metrics. Scores are anchored to the assessor's grades (below). |
+
+### How scoring works
+
+1. **During the interview**, the assessor grades every answer 1–5 against that question's rubric (the dots in quick feedback).
+2. **Per question in the report**: anchor = your best grade on that question × 2 (out of 10). The coach may move it by at most ±1
+   with evidence — and code enforces this, whatever the model returns.
+3. **Overall**: anchor = the average of the question anchors; again the coach may move it by at most ±1 (5 borderline, 7 likely pass,
+   9+ exceptional). Skill-breakdown scores are kept consistent with it.
+4. **Delivery** is one skill out of five: pace uses only the time the mic was actually recording, and filler words cost at most a
+   couple of points. The coach is given the real numbers and its delivery note must agree with them.
+5. STAR structure is only expected on behavioural questions; technical and coding answers are judged on a clear step-by-step
+   explanation. For code, the actual run result is trusted — code that printed the right output can't be called wrong on that example.
+6. If the AI coach is unavailable, the rule-based report uses the same idea: 70% per-question grades, 30% the five skill scores.
 
 **Why the decision is code, not the model:** the LLM *perceives* (grades) and *speaks*, but *what to do next* follows explicit rules.
 That keeps the interview structured, bounded in length (at most 2 follow-ups per question), and explainable in the reasoning panel.
@@ -298,6 +312,8 @@ Logs: `npx vercel logs --deployment prepwise-red-xi.vercel.app` (lines start wit
 | Code runner | C++, Java (incl. `public class Main`), Python, JavaScript: correct output, compile error, runtime error and time-limit cases all reported correctly; 1–10 s per run |
 | Code grading (live AI) | Code solving the wrong problem → `off_topic`, interviewer redirected; correct O(n) two-sum with explanation → `strong` 5/5, tough interviewer asked a harder follow-up |
 | Whisper | Synthesised spoken answer → accurate transcript in ~2 s, fillers ("Um", "Uh") kept |
+| Report scoring (live AI) | Same strong sample interview twice → 9/10 both times, questions 10/10/8, delivery note matched the real 110 wpm; weak sample interview → 4/10 (anchoring doesn't inflate scores) |
+| Filler detection | "a structure like a heap", "I'd like to" → not fillers; "it was, like, fast", "like uh" → fillers |
 | Static checks | `tsc --noEmit` and `eslint` clean |
 
 ## 12. Development log — everything we built and fixed
@@ -332,6 +348,10 @@ Logs: `npx vercel logs --deployment prepwise-red-xi.vercel.app` (lines start wit
     The planner was also stopped from inventing "your recent project" when no resume is given.
 15. **Switched voice answers to Whisper** (free on Groq) for much better accuracy on accents and technical terms, in every browser,
     with the browser engine as live preview and fallback; Whisper is primed to keep "um/uh" so filler counts stay meaningful.
+16. **Fixed unfair report scores.** A good interview was scored 4/10 because the overall score was a fresh, strict AI guess not
+    tied to the per-answer grades. Now every question score and the overall score are anchored to the assessor's grades (±1).
+    Also fixed: speaking pace counted thinking, typing and Whisper wait time (now only recording time); "like" was always counted as a
+    filler (now only when used as one); the delivery note could contradict the numbers; STAR was demanded on technical questions.
 
 ## 13. Known limitations and future work
 
